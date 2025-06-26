@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Psychedelic Background with External Shaders</title>
+<style>
+ html, body {
+  margin: 0; padding: 0; height: 100%; overflow: hidden;
+  background: black;
+}
+canvas {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100vw;
+  height: 100vh;
+  display: block;
+}
+</style>
+</head>
+<body>
+<canvas></canvas>
+
+<script>
+let gl, program, geom, pending;
+
+function compileAndLinkGLSL(vs_source, fs_source) {
+    let vs = gl.createShader(gl.VERTEX_SHADER);
+    gl.shaderSource(vs, vs_source);
+    gl.compileShader(vs);
+    if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) {
+        console.error(gl.getShaderInfoLog(vs));
+        throw new Error("Vertex shader compilation failed");
+    }
+
+    let fs = gl.createShader(gl.FRAGMENT_SHADER);
+    gl.shaderSource(fs, fs_source);
+    gl.compileShader(fs);
+    if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
+        console.error(gl.getShaderInfoLog(fs));
+        throw new Error("Fragment shader compilation failed");
+    }
+
+    program = gl.createProgram();
+    gl.attachShader(program, vs);
+    gl.attachShader(program, fs);
+    gl.linkProgram(program);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        console.error(gl.getProgramInfoLog(program));
+        throw new Error("Program linking failed");
+    }
+}
+
+function setupGeomery(geom) {
+    const vao = gl.createVertexArray();
+    gl.bindVertexArray(vao);
+
+    Object.entries(geom.attributes).forEach(([name, data]) => {
+        const buffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data.flat()), gl.STATIC_DRAW);
+
+        const loc = gl.getAttribLocation(program, name);
+        gl.enableVertexAttribArray(loc);
+        gl.vertexAttribPointer(loc, data[0].length, gl.FLOAT, false, 0, 0);
+    });
+
+    const indexBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(geom.triangles.flat()), gl.STATIC_DRAW);
+
+    return {
+        mode: gl.TRIANGLES,
+        count: geom.triangles.flat().length,
+        type: gl.UNSIGNED_SHORT,
+        vao: vao
+    };
+}
+
+// Your setup3 function as provided:
+async function setup3() {
+    gl = document.querySelector('canvas').getContext('webgl2');
+    if (!gl) {
+        alert("WebGL2 not supported");
+        return;
+    }
+
+    let vs = await fetch('vertex.glsl').then(res => res.text());
+    let fs = await fetch('frag.glsl').then(res => res.text());
+    compileAndLinkGLSL(vs, fs);
+
+    let data = await fetch('geometry.json').then(r => r.json());
+    geom = setupGeomery(data);
+
+    gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+    gl.clearColor(0, 0, 0, 1);
+}
+
+function draw3(milliseconds) {
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.useProgram(program);
+
+    const secondsBindPoint = gl.getUniformLocation(program, 'seconds');
+    gl.uniform1f(secondsBindPoint, milliseconds / 1000);
+
+    const translationMatrix = [
+        1, 0, 0, Math.cos(milliseconds / 1000),
+        0, 1, 0, Math.cos(milliseconds / 1000),
+        0, 0, 1, Math.cos(milliseconds / 1000),
+        0, 0, 0, 1
+    ];
+
+    const shaderIdentityMatrix = gl.getUniformLocation(program, "u_matrix");
+    gl.uniformMatrix4fv(shaderIdentityMatrix, false, new Float32Array(translationMatrix));
+
+    gl.bindVertexArray(geom.vao);
+    gl.drawElements(geom.mode, geom.count, geom.type, 0);
+
+    pending = requestAnimationFrame(draw3);
+}
+
+function resize() {
+    const canvas = gl.canvas;
+    const dpr =  1;
+    const width = window.innerWidth * dpr;
+    const height = window.innerHeight * dpr;
+    if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+        canvas.style.width = window.innerWidth + 'px';   // CSS size matches window
+        canvas.style.height = window.innerHeight + 'px';
+        gl.viewport(0, 0, width, height);
+    }
+}
+
+window.addEventListener('resize', () => {
+    if (!gl) return;
+    resize();
+});
+
+window.addEventListener('load', async () => {
+    const canvas = document.querySelector('canvas');
+    canvas.width = window.innerWidth * (window.devicePixelRatio || 1);
+    canvas.height = window.innerHeight * (window.devicePixelRatio || 1);
+
+    await setup3();
+    resize();
+
+    pending = requestAnimationFrame(draw3);
+});
+</script>
+
+</body>
+</html>
